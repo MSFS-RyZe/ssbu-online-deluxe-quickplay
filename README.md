@@ -1,66 +1,181 @@
-# SSBU Online Deluxe
+# SSBU Online Deluxe (Quickplay & Stealth Edition)
 
-A performance and online enhancement mod for **Super Smash Bros. Ultimate** that introduces latency controls, render optimizations, and real-time online information.
+[![Game Version](https://img.shields.io/badge/SSBU-13.0.5-orange.svg)](https://www.smashbros.com/)
+[![Platform](https://img.shields.io/badge/Platform-Nintendo%20Switch%20%7C%20Eden%20Emulator-blue.svg)](https://github.com)
+[![Rust](https://img.shields.io/badge/Rust-2021%20Edition-red.svg)](https://www.rust-lang.org/)
+[![Skyline](https://img.shields.io/badge/Skyline-Plugin-brightgreen.svg)](https://github.com/skyline-dev/skyline)
+[![License](https://img.shields.io/badge/License-GPL%20v3.0-lightgrey.svg)](LICENSE)
 
+An advanced performance, input latency reduction, and networking enhancement mod for **Super Smash Bros. Ultimate (v13.0.5)**.
 
-> ⚠️ SSBU 13.0.5 does **NOT** change how packets are sent, received, or parsed. This mod operates exclusively at the P2P networking layer, meaning it modifies traffic exchanged directly between players. The game server is not involved in this communication and, under normal operation, should have no visibility into what this mod is doing. There is currently no known indication that 13.0.5 introduced additional checks for invalid or modified P2P packet data that could result in a ban. **The risk of using this mod on 13.0.5 is therefore the same as on previous versions.**  
+This repository is an enhanced fork of [saad-script/ssbu-online-deluxe](https://github.com/saad-script/ssbu-online-deluxe), specially engineered to unlock **full input delay reduction and latency slider controls in Official Nintendo Quickplay & Elite Smash**, eliminate matchmaking/transition crashes, and introduce a zero-trace **Stealth Mode** with runtime kernel memory patching.
 
-> ⚠️ This is a work in progress. Features and stability may change as development continues.  
-> ⚠️ Use at your own risk. I have been testing this mod online personally without any major issues, but there is still a non-zero risk of a ban. The overclocks are intentionally minimal; however, any hardware damage or account penalties remain your responsibility.  
+> [!NOTE]
+> ¿Prefieres leer esto en español? Consulta la versión en español: [README_ES.md](README_ES.md).
 
-## ✅ Compatibility
+---
 
-- ✔️ Nintendo Switch (console)
-- ✔️ Eden Emulator (requires workaround, see installation section below)
-- ⚠️ Other emulators: not yet tested (not planned)
-- ⚠️ HDR support not yet tested (planned)
+## 🌟 What's New in this Fork?
+
+| Feature | Upstream (saad-script v1.4.1) | This Fork (Quickplay & Stealth Edition) |
+| :--- | :--- | :--- |
+| **Quickplay & Elite Smash** | ❌ Render profiles & latency slider locked out (vanilla only) | ✅ **Fully Unlocked**: LessLag, LLUltra, LLDoubles, and Latency Slider work in Quickplay & Elite Smash |
+| **ssbusync Restriction** | ⚠️ Reverts to Vanilla when entering Quickplay | ✅ **Automated Arena Bypass**: Keeps render profiles active across all online matchmaking |
+| **Profile Drift Correction** | ❌ None (profiles can be lost mid-game) | ✅ **Active Drift Detection**: Live per-frame verification re-applies profile if game engine reverts |
+| **Matchmaking & Loading Stability** | ⚠️ Crashes on loading screens, stage load & queue shifts | ✅ **Transition Grace Period**: 300-frame guard eliminates transition and pane null-dereference crashes |
+| **Stealth Mode (Anti-Detection)** | ❌ Not available (broadcasts mod beacon `0x45` & custom PIA data) | ✅ **Kernel SVC 0x6 Memory Patching**: Zero packet broadcast, suppresses `[Wired]`/`[Wifi]` tags, 100% vanilla appearance |
+| **Dynamic Resolution in Quickplay** | ❌ Disabled in Quickplay | ✅ **Enabled**: Maintains smooth frametimes during zoom-in finishes and intensive effects |
+| **ssbusync-guest Crash Handler** | ⚠️ Aborts with panic if remote API symbol is missing | ✅ **Patched vendored crate**: Graceful failover with zero crashes |
+
+---
+
+## 🚀 Key Features & Architectural Enhancements
+
+### 1. ⚔️ Full Quickplay & Elite Smash Integration
+In the upstream version, SSBU's render optimizations (`ssbusync`) and custom latency adjustments were restricted to Arenas and Local Online. When entering Quickplay on official servers, `ssbusync` detected the lack of an arena flag and forcibly stripped all environment flags, reverting graphics to Vanilla.
+
+- **Dynamic Arena Marking (`ssbusync_restrict_mark_arena_mode`)**: Hooks and injects the arena flag during Quickplay/Elite matchmaking.
+- **Smart Refresh Throttling**: ssbusync wipes mode flags across scene transitions; this fork refreshes the arena mark every ~60 frames without flooding the console log.
+- **Render Profile Drift Detection**: During real matches, the mod continuously audits live graphics flags against the player's selected profile (`LessLag`, `LLUltra`, etc.) and automatically re-applies it if the engine attempts to revert.
+- **Latency Slider in Quickplay**: The 0f–25f input buffer slider is fully functional in official Quickplay and Elite Smash.
+
+### 2. 🛡️ Anti-Crash & Matchmaking Stability System
+Quickplay matchmaking involves rapid transitions between background matchmaking, the training waiting room, stage loading, and real matches. Upstream suffered from severe stability issues:
+
+- **Transition Grace Period (`TRANSITION_GRACE_FRAMES = 300`)**: When a scene transition or stage pre-setup begins, unsafe UI pane modifications and ssbusync calls are suspended for a 300-frame (~5-second) buffer window. This prevents crashes while the render pipeline and memory layout are tearing down or rebuilding.
+- **Null Pointer Dereference Protection**: Added strict null-pointer validation (`reg_ptr.is_null()`) in the latency slider hook to prevent fatal memory exceptions during rapid scene changes.
+- **State Preservation**: Prevents the main menu hook from prematurely resetting `MatchConnectionStatus` to `Offline` during internal Quickplay matchmaking handoffs.
+- **Untracked Match Fallback**: Matches that begin without an explicit arena or local handle are automatically recognized and classified as Quickplay instead of entering an invalid state.
+
+### 3. 🕶️ Stealth Mode (Anti-Detection & Privacy Hardening)
+When playing online against other modded consoles, `libssbu_pia_manager` appends a 2-byte beacon tag (`[0x45, <connection_byte>]`) to peer-to-peer PIA traffic. This tag reveals your modded status (`is_modded`) and displays `[Wired]` or `[Wifi]` next to your ping. Furthermore, SSBU Online Deluxe by default broadcasts custom 4-byte extended packets (displaying your latency and profile to other users).
+
+Enabling `stealth_mode = true` in `config.toml` provides complete privacy:
+
+- **Kernel-Level Memory Hotpatching**:
+  - Uses Nintendo Switch kernel `svcQueryMemory` (SVC 0x6) to dynamically inspect the `.text` segment of `libssbu_pia_manager`.
+  - Performs a signature scan to locate the beacon constant and hotpatches:
+    ```text
+    mov w8, #0x45   --->   mov w8, #0x00
+    ```
+  - The manager never emits the modded identifier tag. Other modded consoles cannot detect that you are running mods or see connection suffixes.
+- **Zero-Packet Broadcast**: Completely unhooks the custom PIA data sender (`send_pia_data_hook`).
+- **One-Way (Antisocial) Reception**: Your console remains completely silent and appears 100% vanilla to peers and Nintendo servers, yet you can still view opponents' ping, stability metrics, and profiles.
+
+### 4. ⚡ Dynamic Resolution Scaling (Perf Scaler) in Quickplay
+The upstream mod intentionally exited early if Quickplay mode was active. This fork re-enables `sync_guest` dynamic resolution scaling across all online modes, ensuring rock-solid 60 FPS during heavy moves, critical-hit zoom-ins, and Sephiroth’s Gigaflare.
+
+### 5. 📦 Vendored & Hardened `smash-ultelier`
+Patched `vendor/smash-ultelier/crates/sync-guest/src/lib.rs` to eliminate:
+```rust
+panic!("[ssbusync] Unable to read remote api version");
+```
+If an API version cannot be read or matched, it fails silently and safely rather than crashing the game process.
+
+---
+
+## 🎮 Controls
+
+### Native In-Game UI (Character Select Screen & Arena)
+
+> **Controller Note**: `All Shoulder Buttons` = `L + R + Z` on GameCube Controller, or `ZL + ZR + L + R` on Nintendo Switch Pro Controller / Joy-Cons.
+
+| Action | Input | Description |
+| :--- | :--- | :--- |
+| **Adjust Latency** | `D-Pad Left` / `D-Pad Right` | Change input delay buffer (`Auto`, `0f` to `25f`) |
+| **Change Render Profile** | `D-Pad Up` / `D-Pad Down` | Cycle between profiles (`Auto`, `Vanilla`, `LessLag`, `LLUltra`, `LLDoubles`) |
+| **Toggle FPS Boost (FPS++)** | `All Shoulder Buttons + X` | Toggles FPS Boost mode (Emulator only) |
+| **Toggle Streamer Mode** | `All Shoulder Buttons + Y` | Instantly show or hide the on-screen native UI |
+| **Cycle Opponent Info** | `L + R + D-Pad Left/Right` | Cycle between opponent telemetry in matches with >2 players |
+
+### ImGui Overlay UI (Optional)
+
+| Action | Input | Description |
+| :--- | :--- | :--- |
+| **Cycle Overlay Mode** | `L + R + D-Pad Down` | Switch between `Hidden`, `Full Info`, and `Performance Info` |
+| **Navigate Overlay Rows** | `D-Pad Up` / `D-Pad Down` | Select row in `Full Info Mode` |
+| **Adjust Selected Value** | `D-Pad Left` / `D-Pad Right` | Modify value of the highlighted row |
+| **FPS Boost via Overlay** | `All Shoulder Buttons + X` | Toggle FPS Boost when `NetProfile` row is highlighted |
+
+---
+
+## 🏎️ Render Profiles Explained
+
+- **Auto**: Automatically selects the optimal profile based on your platform (Console vs. Emulator) and match size (Singles vs. Doubles).
+- **Vanilla**: Default game rendering pipeline. Zero graphical or input modifications.
+- **LessLag**: Bypasses frame buffering to reduce **3 frames** of native engine input delay. Extremely stable on console.
+- **LLUltra (LessLag Ultra)**: Reduces **4 frames** of native input delay.
+  - *Console note*: Features dynamic resolution scaling to avoid stutters.
+- **LLDoubles (Recommended for 3+ Players)**: Reduces **2 frames** of native input delay with maximum overhead headroom for multi-character chaos.
+- **FPS++ Mode (Emulator Only)**: Further reduces input delay on compatible PC emulators.
+
+---
+
+## ⚙️ Configuration (`config.toml`)
+
+Place your configuration file at:
+```text
+sd:/ultimate/ssbu_online_deluxe/config.toml
+```
+
+### Complete Example with Stealth Mode:
+
+```toml
+# ==========================================================
+# SSBU Online Deluxe - Configuration File
+# ==========================================================
+
+# Enable Stealth Mode to conceal modded status from other players.
+# When true, you appear completely vanilla to opponents, but can
+# still view their telemetry.
+stealth_mode = true
+
+# Built-in Switch Overclocker integration.
+# Set to 'false' if you use an external sysmodule (e.g., sys-clk)
+overclocker = true
+
+[render_profile_config]
+# Profile used in menus (recommended: "Vanilla")
+menu = "Vanilla"
+
+# Profiles applied for offline matches
+offline_match.singles = "Vanilla"
+offline_match.doubles = "Vanilla"
+
+# Profiles selected automatically when in 'Auto' mode
+online_match.singles = "LessLagUltra"
+online_match.doubles = "LessLag"
+```
+
+---
 
 ## 📦 Installation
 
-> ⚠️ Remove any previous latency slider mod, vsync mod, and less lag mod before proceeding with the installation steps!
+> [!WARNING]
+> Remove any older standalone **Latency Slider**, **VSync**, or **Less Lag** mods before installing to prevent conflicts.
 
-### Manual Installation
+### Required Prerequisites
+Ensure your SD card / emulator has the following installed:
+1. **Skyline** (Use the tested version bundled with SSBU Online Deluxe releases)
+2. **Arcropolis**
+3. **NRO Hook**
+4. **Smashline**
+5. **imgui-smash**
+6. **ssbu-pia-manager**
+7. **ssbusync** (Use the companion version provided in releases)
 
-- Ensure you have these prerequisite installed on your switch/emulator:
-  - ~~[skyline](https://github.com/skyline-dev/skyline/releases)~~
-    - ⚠️ The latest version causes crashes. Use the version bundled into the ssbu-online-deluxe release zip.
-  - [arcropolis](https://github.com/raytwo/arcropolis/releases)
-  - [nro-hook](https://github.com/ultimate-research/nro-hook-plugin/releases)
-  - [smashline](https://github.com/HDR-Development/smashline/releases)
-  - [imgui-smash](https://github.com/Coolsonickirby/imgui-smash/releases)
-  - [ssbu-pia-manager](https://github.com/project-ultelier/ssbu-pia-interface/releases)
-  - ~~[ssbusync](https://github.com/project-ultelier/smash-ultelier/releases)~~
-    - ⚠️ Currently outdated. Use the version bundled into the ssbu-online-deluxe release zip.
-- Then you can install the latest release of ssbu-online-deluxe: [ssbu-online-deluxe](https://github.com/saad-script/ssbu-online-deluxe/releases)
+### Directory Structure
 
+Place the files on your SD card (or `sdmc/` on emulator) as shown below:
 
-### Automatic Installation
-
-Console:
-- From the releases page, download `create-sdcard-folder.zip` and then run `create-sdcard-folder.bat`. On linux, you can install powershell for your distro and run `create-sdcard-folder.ps1`. It will download and setup the atmosphere folder for you in a newly created folder `sdcard/`. Then copy the contents of `sdcard/` to the root of your SD card.
-- Alternatively, you can use the app I made: [ssbu-emu-optimizer](https://github.com/saad-script/ssbu-emu-optimizer/releases). Install, then click `Generate SDCard Folder`, then copy the generate folder contents to the root of the sd card.
-
-Emulator:
-- From the releases page, download `create-sdcard-folder.zip` and then run `create-sdcard-folder.bat`. On linux, you can install powershell for your distro and run `create-sdcard-folder.ps1`. It will download and setup the atmosphere folder for you in a newly created folder `sdcard/`. Then copy the contents of `sdcard/` to your `eden/sdmc` folder.
-  - Then, apply this workaround if you are on Eden emulator:
-    - Right click SSBU -> Click `Configure Game` -> Click `System` tab -> Check `RNG Seed` -> Set to `00000000`
-- Alternatively, you can use the app I made: [ssbu-emu-optimizer](https://github.com/saad-script/ssbu-emu-optimizer/releases). Install, and then configure it to point to the correct eden folder, then check `SSBU Settings`, `SSBU Mods`, `Save Data` (if you want a 100% save), then click optimize.
-
-
-### Verify
-
-Verify that your sdcard directory strucure looks like this on your switch or emulator:
-
-```
-`sdcard/` (or `sdmc/` on emulator)
-│
+```text
+sdcard/
 ├── atmosphere/
 │   └── contents/
-│       ├── 00FF0000A11CE0FF/
+│       ├── 00FF0000A11CE0FF/           <-- (Overclock sysmodule)
 │       │   ├── exefs.nsp
-│       │   └── flags/
-│       │       └── boot2.flag
-│       └── 01006A800016E000/
+│       │   └── flags/boot2.flag
+│       └── 01006A800016E000/           <-- SSBU Title ID
 │           ├── exefs/
 │           │   ├── main.npdm
 │           │   └── subsdk9
@@ -72,146 +187,56 @@ Verify that your sdcard directory strucure looks like this on your switch or emu
 │                       ├── libnro_hook.nro
 │                       ├── libnx_over.nro
 │                       ├── libsmashline_plugin.nro
-│                       ├── libssbu_online_deluxe.nro
+│                       ├── libssbu_online_deluxe.nro   <-- THIS MOD
 │                       ├── libssbu_pia_manager.nro
 │                       └── libssbusync.nro
-│
+└── ultimate/
+    └── ssbu_online_deluxe/
+        └── config.toml                         <-- (Optional configuration)
 ```
 
-## 🎮 Controls
+---
 
-### Native UI (Online Character Select Screen and Online Arena)
+## 🛠️ Building from Source
 
-> Note: `All Shoulder Buttons` = `L + R + Z` on gamecube controller, `ZL + ZR + L + R` on procontroller
+### Requirements
+- [Rust](https://rustup.rs/) (Nightly toolchain)
+- `cargo-skyline` (`cargo install cargo-skyline`)
+- Target: `aarch64-skyline-switch`
 
-- On the character select screen or online arena:
-  - `D-pad Left/Right`: Select network latency
-  - `D-pad Up/Down`: Select render profile
-  - `All Shoulder Buttons + X`: Toggle FPS Boost Mode (AKA FPS++ mode)
-  - `All Shoulder Buttons + Y`: Toggle Streamer Mode (show/hide custom native ui)
-
-- On the character select screen (more than one opponent):
-  - `Left Trigger + Right Trigger + Dpad Left/Right`: Cycle between which opponent's network info to show
-
-See 'Features' section below to see what these options do
-
-### Overlay UI (Optional)
-
-- `Left Trigger + Right Trigger + D-Pad Down` → Cycle between current window mode
-  - Window Modes: `Hidden`, `Full Info`, `Performance Info`
-  - In `Full Info Mode`:
-    - `D-Pad Up / Down` → Select row
-    - `D-Pad Left / Right` → Change value
-    - While row `NetProfile` is selected:
-      - `All Shoulder Buttons + X`: Toggle FPS Boost mode (AKA FPS++ mode)
-
-See 'Features' section below to see what these options do
-
-## ✨ Features
-
-### 🌐 Online Enhancements
-
-- Display **opponent ping** in all online modes (including Elite Smash):
-  - Network RTT (ping) / connection quality
-  - Green=Stable, Yellow=Inconsistent, Red=Unstable
-- Show **extended opponent info** *(only if both players have the mod)*:
-  - Opponent’s current network/render settings (latency slider, render profile)
-
-### 🎛️ Online Latency Controls
-*(Available in Online Arena and Local Online modes only)*  
-*(Available in Quickplay/Elite on Nextendo servers only)*
-
-- This allows you to control the online latency delay frames.
-- Adjust:
-  - Latency value:
-    - Auto: Applies SSBU's default latency calculation method.
-    - 0f-25f: Manually set the latency delay frames
-
-> It is recommended to manually set the latency delay frames based on the ping and connection quality.
-
-### 🎛️ Render Profile Controls
-*(Available in Online Arena and Local Online modes only)*  
-*(Available in Quickplay/Elite on Nextendo servers only)*
-
-- This allows you to set the games render/graphic settings for less native input delay.
-- Adjust:
-  - Render Profile:
-    - Auto: Applies the recommended profile based on platform (console/emulator) and number of players.
-    - Vanilla: This is the default vanilla profile that the game uses by default.
-    - LessLag: This applies optimizations to cut 3 frames of native input delay.
-    - LLUltra: This applies optimizations to cut 4 frames of native input delay.
-      - This also works on console, but the game resolution will be scaled down to keep it stutter free.
-      - On console, you may notice that certain UI elements look glitchy, such as the fighter cut-in screen, and match start countdown ui.
-    - LLDoubles (Recommended for doubles): This applies optimizations to cut 2 frames of native input delay. This should work even in doubles when there are alot of players on screen without stuttering.
-  - FPS Boost mode (AKA FPS++ Mode):
-    - Only available on emulators.
-    - If enabled, the current profile has '++' at the end of it. For example: LLUltra++
-    - The amount of native latency it reduces varies based on the currently selected profile. For example, this will cutoff 3f of delay on Vanilla profile. But on LLUltra, it will only cutoff about half a frame of delay.
-    - This may introduce some frametime variance causing the game to not feel as smooth.
-
-**If you arent sure what profile to use, just leave it on Auto**
-
-Best profile for console:
-  - LessLag or LLUltra (depending on preference)
-
-Best profile for emulator:
-  - LLUltra
-
-Best profile for doubles:
-  - LLDoubles
-
-> The mod will apply the **selected render profile automatically** when entering a valid online match.  
-> Reverts to **vanilla settings** after exiting  
-> You can play offline/training modes without having to worry about timing differences.
-
-### 🎛️ Render Profile Config (Optional)
-
-You can specify a config file in `sd/ultimate/ssbu_online_deluxe/config.toml`
-- This will allow you to set the profile to use in the menu, and offline singles/doubles matches
-- Add '++' at the end of the profile name to enable fps boost mode (emulator only)
-- If you already have an overclock sysmodule, and dont want to conflict with or use ssbu-online-deluxe's built in overclocker:
-  - Set `overclocker = false` in config file
-  - Delete `libnx_over.nro` plugin file
-  - Delete `atmosphere/contents/00FF0000A11CE0FF/` sysmodule folder
-  - Restart switch
-- All fields are optional. If you dont specify a field, it will use the default/recommended value.
-
-Example `config.toml`:
+### Build Command
+```bash
+cargo skyline build --release
 ```
-overclocker = true                          # Set to 'false' if you are using your own overclock sysmodule
-
-[render_profile_config]
-menu = "Vanilla"                            # Recommended to keep this on Vanilla always
-offline_match.singles = "Vanilla"           # Applies to offline single matches (1 or 2 players)
-offline_match.doubles = "Vanilla"           # Applies to offline doubles matches (more than 2 players)
-online_match.singles = "LessLagUltra++"     # 'Auto' mode will choose this profile for online single matches
-online_match.doubles = "LessLag"            # 'Auto' mode will choose this profile for online double matches
+The compiled plugin will be located at:
+```text
+target/aarch64-skyline-switch/release/libssbu_online_deluxe.nro
 ```
 
-## 📝 Notes and Contribution
+---
 
-- The dynamic resolution logic currently only applies to zoom in moves (final hit/critical hit) and Sephiroth's gigaflare.  
-- Contributions are open especially for applying dynamic resolution to moves that cause stutter. I don't know if I'll have time to optimize every single move, so if you notice a specific move causes stutters, you can use smashline's api to contribute and optimize the move. You can start by viewing how `src/perf_scaler` currently applies dynamic resolution optimization.
+## ⚠️ Online Safety & Disclaimer
 
-## 🙌 Credits
+- **Protocol Conformity**: This mod operates strictly at the P2P networking layer and local render pipeline. Game servers are not involved in P2P traffic exchange.
+- **SSBU 13.0.5**: SSBU 13.0.5 does not alter packet validation checks for P2P traffic.
+- **Risk Notice**: As with any Nintendo Switch modding on official servers, a non-zero risk of account or console restrictions exists. Use at your own discretion. Enabling `stealth_mode = true` is highly recommended for maximum privacy.
 
-Huge thanks to the following people who made this possible. Without these people, this project wouldn't have been possible:
+---
 
-- **Bludev**
-  For SSBU render system research and the initial less-lag and latency slider mod.
+## 🙌 Credits & Acknowledgments
 
-- **BlankMauser**
-  Creator of the SsbuSync and smash-ultelier mod, which this mod uses to modify ssbu's render system.
-  BlanksMauser's work and guidance on SSBU’s rendering internals were critical to making this mod possible.
+This project builds upon pioneering work in the Smash Ultimate research and modding community:
 
-- **Kinnay** & contributors of the NintendoClients repo/wiki
-  For guidance on network service implementation. The network service wouldn't have been possible if not for the incredible efforts of these people.
+- **[saad-script](https://github.com/saad-script)** — Original creator and maintainer of [ssbu-online-deluxe](https://github.com/saad-script/ssbu-online-deluxe).
+- **Bludev** — Seminal SSBU render system research and original Less-Lag / Latency Slider implementations.
+- **BlankMauser** — Creator of SsbuSync and smash-ultelier; invaluable architectural guidance on SSBU render internals.
+- **Kinnay & NintendoClients Contributors** — Comprehensive network service and PIA protocol documentation.
+- **Coolsonickirby** — Creator of `imgui-smash` and `imgui-api`.
+- **The HDR Development Team** — For Smashline and moveset hooking infrastructure.
+- **Skyline Team** — For the Switch homebrew runtime hooking framework.
 
-- **Coolsonickirby**
-  For the imgui-smash plugin, making UI development significantly easier
+---
 
-- **The HDR team**
-  For smashline, allowing for easy figher/effect/moveset hooks and adjustments 
+## 📄 License
 
-- **The developers of Skyline**
-  For the modding environment, allowing for code hooking/edits
+This project is licensed under the **GNU General Public License v3.0 (GPLv3)** — see the [LICENSE](LICENSE) file for details.

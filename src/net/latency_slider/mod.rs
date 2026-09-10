@@ -4,7 +4,6 @@ use std::sync::atomic::{AtomicI8, Ordering};
 use skyline::hooks::InlineCtx;
 
 use crate::input_poll::InputSnapshot;
-use crate::net;
 
 const MAX_INPUT_BUFFER: u8 = 25;
 const VALUE_UNKNOWN: i8 = i8::MIN;
@@ -146,21 +145,30 @@ impl LatencySliderManager {
 
 #[skyline::hook(offset = 0x16ccab8, inline)]
 unsafe fn set_online_latency(ctx: &InlineCtx) {
-    if net::is_valid_online_mode() {
-        println!("SET ONLINE LATENCY");
-        let auto = *(ctx.registers[19].x() as *mut u8);
-        LAST_AUTO.store(auto as i8, Ordering::SeqCst);
-        let buffer = LatencySliderManager::instance()
-            .selected_latency
-            .buffer
-            .load(Ordering::SeqCst);
-        LatencySliderManager::instance()
-            .active_latency
-            .buffer
-            .store(buffer, Ordering::SeqCst);
-        if buffer >= 0 {
-            *(ctx.registers[19].x() as *mut u8) = buffer as u8;
-        }
+    println!("SET ONLINE LATENCY");
+    crate::net::mark_arena_mode_for_ssbusync();
+    let reg_ptr = ctx.registers[19].x() as *mut u8;
+    
+    // Comprobación de seguridad obligatoria para evitar crasheos en Quickplay/Elite
+    if reg_ptr.is_null() {
+        return;
+    }
+
+    let auto = *reg_ptr;
+    LAST_AUTO.store(auto as i8, Ordering::SeqCst);
+    
+    let buffer = LatencySliderManager::instance()
+        .selected_latency
+        .buffer
+        .load(Ordering::SeqCst);
+        
+    LatencySliderManager::instance()
+        .active_latency
+        .buffer
+        .store(buffer, Ordering::SeqCst);
+        
+    if buffer >= 0 {
+        *reg_ptr = buffer as u8;
     }
 }
 

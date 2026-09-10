@@ -3,6 +3,8 @@ use std::sync::{
     Arc, LazyLock, Mutex,
 };
 
+pub mod manager_stealth;
+
 use arc_swap::ArcSwap;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
@@ -158,6 +160,11 @@ fn send_pia_data_hook(_station: ConnectedStation, data: &mut [u8]) {
 }
 
 fn receive_pia_data_hook(station: ConnectedStation, data: &[u8]) {
+    // Version 0 is reserved: stealth-mode peers zero their broadcast buffer
+    // instead of sending nothing. Treat it exactly like playing against a vanilla console.
+    if data.first() == Some(&0) {
+        return;
+    }
     let id = station.get_id();
     let stations_table = CONNECTED_STATION_TABLE_ATOMIC_VIEW.load();
     if let Some(station) = stations_table.iter().find(|s| s.id == id) {
@@ -189,7 +196,10 @@ pub(super) fn install() {
     StationConnectionManager::register_station_connection_changed_callback(
         on_station_connection_changed,
     );
-    StationConnectionManager::register_station_data_send_hook(send_pia_data_hook);
+    if !crate::render::stealth_mode_enabled() {
+        StationConnectionManager::register_station_data_send_hook(send_pia_data_hook);
+    }
+    manager_stealth::arm();
     StationConnectionManager::register_station_data_received_hook(receive_pia_data_hook);
 
     #[cfg(feature = "dummy_connection")]

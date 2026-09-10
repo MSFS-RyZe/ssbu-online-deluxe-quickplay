@@ -21,6 +21,7 @@ static RENDER_CONFIG: LazyLock<ArcSwap<RenderConfig>> =
 pub struct RenderConfig {
     render_profile_config: RenderProfileConfig,
     overclocker: bool,
+    stealth_mode: bool,
 }
 
 impl Default for RenderConfig {
@@ -28,8 +29,13 @@ impl Default for RenderConfig {
         Self {
             render_profile_config: RenderProfileConfig::default(),
             overclocker: true,
+            stealth_mode: false,
         }
     }
+}
+
+pub fn stealth_mode_enabled() -> bool {
+    RENDER_CONFIG.load().stealth_mode
 }
 
 #[no_mangle]

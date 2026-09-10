@@ -34,3 +34,6 @@ panic = "abort"
 panic = "abort"
 lto = true
 
+[patch.'https://github.com/project-ultelier/smash-ultelier.git']
+ultelier = { path = "vendor/smash-ultelier" }
+

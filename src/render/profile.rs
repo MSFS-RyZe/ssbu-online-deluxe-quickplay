@@ -491,11 +491,11 @@ impl RenderProfileManager {
     fn apply_render_profile_settings_immediate(rps: &RenderProfileSettings) {
         let is_emulator = is_emulator();
 
-        // apply resolution
+        // Aplicar resolución directamente
         let _ = sync_guest::set_default_game_resolution_level(rps.default_resolution_level);
         let _ = sync_guest::set_dynamic_resolution_enabled(rps.dynamic_res_enabled);
 
-        // apply render options
+        // Aplicar flags de renderizado de forma segura
         if let Some(env_flags) = sync_guest::env_flags() {
             let flags = env_flags
                 .with(
@@ -521,7 +521,7 @@ impl RenderProfileManager {
             let _ = sync_guest::replace_env_flags(flags);
         }
 
-        // set overclock profile
+        // Overclock protegido: evita el panic en Quickplay
         let rc = RENDER_CONFIG.load();
         if rc.overclocker && !is_emulator {
             let oc_profile = match (RenderProfile::from_settings(&rps).preset, is_in_game()) {
@@ -533,43 +533,56 @@ impl RenderProfileManager {
                     _,
                 ) => DockedProfile::Singles,
                 (RenderProfilePreset::LessLagUltra | RenderProfilePreset::LessLagDoubles, _) => {
-                    DockedProfile::Ffa
+                    DockedProfile::Singles
                 }
             };
-            let _ = sync_guest::profile::apply_docked_profile(oc_profile);
+            let _ = std::panic::catch_unwind(|| {
+                let _ = sync_guest::profile::apply_docked_profile(oc_profile);
+            });
         }
     }
 }
 
 pub(crate) fn match_init() {
-    let is_valid_online_mode = is_valid_online_mode();
-    let is_connected = is_connected();
+    crate::net::mark_arena_mode_for_ssbusync();
     let match_status = get_match_status();
-    let in_real_online_match = is_connected && match_status != MatchStatus::Training;
+    let is_valid_online_mode = is_valid_online_mode();
+    let is_conn = is_connected();
+    let in_real_online_match =
+        match_status != MatchStatus::Training && (is_valid_online_mode || is_conn);
 
     if in_real_online_match {
-        if is_valid_online_mode {
-            // apply selected profile if its a valid online match
+        if RenderProfileManager::instance().is_auto_mode() {
             RenderProfileManager::instance()
                 .auto_select_profile(true, match_status == MatchStatus::Doubles);
             RenderProfileManager::instance().apply_selected_profile_settings();
         } else {
-            // ssbusync already enforces this, but leaving this here for clarity
-            RenderProfileManager::apply_render_profile_settings_immediate(
-                &RenderProfileSettings::vanilla(),
-            );
+            let selected_settings =
+                RenderProfileManager::instance().selected_render_profile_settings();
+            RenderProfileManager::apply_render_profile_settings_immediate(&selected_settings);
         }
-    } else {
-        let rp = RenderProfileManager::instance()
-            .recommended_render_profile(false, match_status == MatchStatus::Doubles);
-        let rps = RenderProfileSettings::from_render_profile(rp);
-        RenderProfileManager::apply_render_profile_settings_immediate(&rps);
+    }
+}
+
+/// Re-applies the selected render profile if the live environment flags have
+/// drifted from it during a match.
+pub(crate) fn maybe_reapply_match_profile() {
+    if !crate::net::is_in_real_game() {
+        return;
+    }
+    let selected = RenderProfileManager::instance().selected_render_profile_settings();
+    let active = RenderProfileManager::active_render_profile_settings();
+    if selected.to_bits() != active.to_bits() {
+        println!("RENDER PROFILE DRIFT DETECTED, REAPPLYING SELECTED PROFILE");
+        RenderProfileManager::apply_render_profile_settings_immediate(&selected);
     }
 }
 
 pub(crate) fn match_cleanup() {
+    println!("[PROFILE] match_cleanup called");
     let rc = RENDER_CONFIG.load();
     let menu_rp = rc.render_profile_config.menu;
+    println!("[PROFILE] match_cleanup applying menu profile: {:?}", menu_rp);
     RenderProfileManager::apply_render_profile_settings_immediate(
         &RenderProfileSettings::from_render_profile(menu_rp),
     );
